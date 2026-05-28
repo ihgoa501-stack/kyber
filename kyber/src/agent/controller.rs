@@ -72,15 +72,23 @@ impl Controller {
         // Generate next action via LLM
         let sys_prompt = r#"你是 Kyber Agent 的决策控制器。输出下一步行动，JSON 格式:
 {
-  "kind": "read|write|execute|think|browser|respond",
+  "kind": "read|write|execute|navigate|click|type|screenshot|get_text|evaluate|think|respond",
   "description": "做什么",
   "params": {}
 }
+文件操作:
 - read: 读文件 (params: path)
 - write: 写文件 (params: path, content)
-- execute: 执行终端命令 (params: command)
-- browser: 浏览器操作 (params: url, action)
-- think: 内部推理 (params: question)
+- execute: 终端命令 (params: command)
+浏览器操作:
+- navigate: 打开网页 (params: url)
+- click: 点击元素 (params: selector)
+- type: 输入文本 (params: selector, text)
+- screenshot: 截图 (params: path)
+- get_text: 读元素文本 (params: selector)
+- evaluate: 执行JS (params: js)
+其他:
+- think: 内部推理
 - respond: 回复用户 (params: message)"#;
 
         let action_prompt = format!(
