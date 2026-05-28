@@ -30,11 +30,13 @@ pub struct Controller {
     pub done: bool,
     pub task: String,
     pub backend: Backend,
+    /// Last tool execution result — fed directly into next decision prompt
+    pub last_result: Option<String>,
 }
 
 impl Controller {
     pub fn new(max_iterations: u32, task: String, backend: Backend) -> Self {
-        Controller { max_iterations, steps_taken: 0, done: false, task, backend }
+        Controller { max_iterations, steps_taken: 0, done: false, task, backend, last_result: None }
     }
 
     /// Decide next action using LLM.
@@ -91,9 +93,16 @@ impl Controller {
 - think: 内部推理
 - respond: 回复用户 (params: message)"#;
 
+        let last = self.last_result.take().unwrap_or_else(|| "(无)".into());
+        let last_section = if last.len() > 800 {
+            format!("上一步输出(截断): {}... ({})", &last[..800], last.len())
+        } else {
+            format!("上一步输出: {}", last)
+        };
+
         let action_prompt = format!(
-            "任务: {}\n步骤: {}/{}\n状态: {}\n问题: {:?}\n\n输出下一个 JSON 行动。",
-            self.task, self.steps_taken, self.max_iterations, obs.summary, obs.issues
+            "任务: {}\n步骤: {}/{}\n状态: {}\n问题: {:?}\n\n{}\n\n如果上一步已经成功完成了任务，直接输出 respond。否则输出下一步 JSON 行动。",
+            self.task, self.steps_taken, self.max_iterations, obs.summary, obs.issues, last_section
         );
 
         match super::llm::call(&self.backend, sys_prompt, &action_prompt).await {
