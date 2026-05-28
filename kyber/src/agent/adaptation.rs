@@ -8,7 +8,7 @@
 
 use colored::Colorize;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OperatingMode {
     /// Confidence high and stable — act fast, confirm little
     Aggressive,
@@ -48,7 +48,7 @@ impl AdaptationState {
     }
 
     /// Feed a new confidence reading. Returns the updated mode.
-    pub fn update(&mut self, confidence: f64) -> &OperatingMode {
+    pub fn update(&mut self, confidence: f64) -> OperatingMode {
         self.confidence_history.push(confidence);
         if self.confidence_history.len() > 20 {
             self.confidence_history.remove(0);
@@ -94,7 +94,7 @@ impl AdaptationState {
             }
         }
 
-        &self.mode
+        self.mode
     }
 
     /// Compute confidence trend from history (linear regression slope)
@@ -180,17 +180,17 @@ mod tests {
     #[test]
     fn test_stays_nominal_with_mixed_signals() {
         let mut adapt = AdaptationState::new();
-        assert_eq!(*adapt.update(0.6), OperatingMode::Nominal);
-        assert_eq!(*adapt.update(0.5), OperatingMode::Nominal);
-        assert_eq!(*adapt.update(0.7), OperatingMode::Nominal);
+        assert_eq!(adapt.update(0.6), OperatingMode::Nominal);
+        assert_eq!(adapt.update(0.5), OperatingMode::Nominal);
+        assert_eq!(adapt.update(0.7), OperatingMode::Nominal);
     }
 
     #[test]
     fn test_transitions_to_conservative_on_decline() {
         let mut adapt = AdaptationState::new();
         // Two low readings → conservative
-        assert_eq!(*adapt.update(0.3), OperatingMode::Nominal);
-        assert_eq!(*adapt.update(0.2), OperatingMode::Conservative);
+        assert_eq!(adapt.update(0.3), OperatingMode::Nominal);
+        assert_eq!(adapt.update(0.2), OperatingMode::Conservative);
     }
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
         adapt.update(0.80);
         adapt.update(0.85); // consecutive_high=1
         adapt.update(0.87); // consecutive_high=2 → Aggressive
-        assert_eq!(*adapt.update(0.90), OperatingMode::Aggressive);
+        assert_eq!(adapt.update(0.90), OperatingMode::Aggressive);
     }
 
     #[test]
@@ -210,7 +210,7 @@ mod tests {
         adapt.update(0.2); // conservative
         assert_eq!(adapt.mode, OperatingMode::Conservative);
         // Recovery: confidence > 0.5 with positive trend
-        assert_eq!(*adapt.update(0.6), OperatingMode::Nominal);
+        assert_eq!(adapt.update(0.6), OperatingMode::Nominal);
     }
 
     #[test]

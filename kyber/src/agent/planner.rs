@@ -106,7 +106,29 @@ pub async fn execute_subtask(
         safety.advance();
 
         let observation = observer.observe().await;
-        adaptation.update(observation.confidence);
+        let mode = adaptation.update(observation.confidence);
+
+        // Show adaptation status with signal breakdown
+        let mode_str: String = match mode {
+            super::adaptation::OperatingMode::Aggressive => "⚡".into(),
+            super::adaptation::OperatingMode::Nominal => "●".into(),
+            super::adaptation::OperatingMode::Conservative => "⚠".into(),
+            super::adaptation::OperatingMode::Safe => "■".into(),
+        };
+        print!("  {}", mode_str);
+        for (name, score, _) in &observation.breakdown {
+            let c = if *score > 0.7 { format!("{}", name).green() }
+                else if *score < 0.4 { format!("{}", name).red() }
+                else { format!("{}", name).yellow() };
+            print!(" {:.0}%{}", score * 100.0, c);
+        }
+        println!();
+
+        // Double-observe in conservative/safe mode (now actually wired)
+        if adaptation.should_double_observe() {
+            let obs2 = observer.observe().await;
+            println!("  二次观测: {:.2}", obs2.confidence);
+        }
 
         // How 1: adaptation-driven early termination
         if matches!(adaptation.mode, super::adaptation::OperatingMode::Safe) {
@@ -149,10 +171,16 @@ pub async fn execute_subtask(
             return;
         }
 
-        if action.needs_confirm() && matches!(adaptation.mode, super::adaptation::OperatingMode::Safe) {
-            // Safe mode: skip dangerous actions inside sub-tasks
-            observer.add_context(format!("安全模式: 跳过高风险操作 [{}]", action.kind));
-            continue;
+        // Adaptation-modulated safety: skip dangerous actions in unsafe modes
+        if action.needs_confirm() {
+            if matches!(mode, super::adaptation::OperatingMode::Safe) {
+                observer.add_context(format!("安全模式: 跳过高风险 [{}]", action.kind));
+                println!("  {} 安全模式跳过 [{}]", "■".red(), action.kind);
+                continue;
+            }
+            if matches!(mode, super::adaptation::OperatingMode::Conservative) {
+                println!("  {} 保守模式执行 [{}]", "⚠".yellow(), action.kind);
+            }
         }
 
         let result = tools.execute_action(&action);
