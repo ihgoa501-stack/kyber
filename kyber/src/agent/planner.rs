@@ -165,8 +165,18 @@ pub async fn execute_subtask(
         let effective_success = success && !is_low_quality;
 
         observer.record_step(effective_success, &action.kind, output_len);
+
+        // Feed tool output into context so LLM can actually use it
+        let output_preview = match &result {
+            Ok(out) if out.len() > 500 => format!("{}... ({})", &out[..500], out.len()),
+            Ok(out) => out.clone(),
+            Err(e) => e.clone(),
+        };
         observer.add_context(format!(
-            "L2[{}] {} → {}", safety.iteration_count, action, if success { "ok" } else { "fail" }
+            "L2[{}] {} → {} | 输出: {}",
+            safety.iteration_count, action,
+            if success { "ok" } else { "fail" },
+            output_preview,
         ));
 
         let ok = safety.record(&action.kind, success);
