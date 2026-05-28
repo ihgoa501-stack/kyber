@@ -119,6 +119,11 @@ impl Controller {
                         // Heuristic: fill missing params from description
                         fill_missing_params(&kind, &description, &mut params);
 
+                        // respond = task complete
+                        if kind == "respond" {
+                            self.done = true;
+                        }
+
                         return Action { kind, description, params };
                     }
                 }
