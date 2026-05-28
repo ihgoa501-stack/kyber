@@ -1,14 +1,14 @@
-# Control Engineering for Agents
+# Kyber
 
 > **"Every AI agent is a control system."**
 
-A paradigm shift from **Prompt Engineering** (open-loop tinkering) to **Control Engineering for Agents** (closed-loop, stability-guaranteed design).
+A paradigm shift from **Prompt Engineering** (open-loop tinkering) to **Kyber** (closed-loop, stability-guaranteed design).
 
 Inspired by Qian Xuesen's 1954 *Engineering Cybernetics*, this project builds the theoretical and practical framework for designing AI agents using control theory — state-space modeling, stability analysis, observer design, hierarchical control, and online adaptation.
 
 ## Core Insight
 
-| Prompt Engineering (Era 1) | Agentic Frameworks (Era 2) | **Control Engineering for Agents (Era 3)** |
+| Prompt Engineering (Era 1) | Agentic Frameworks (Era 2) | **Kyber (Era 3)** |
 |---|---|---|
 | Write prompt → run → tweak | Plan → tool call → observe → replan | Model state space → design controller → analyze stability → deploy with guarantees |
 | Open-loop | Closed-loop (emergent, not designed) | **Closed-loop (deliberately engineered)** |

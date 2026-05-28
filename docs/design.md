@@ -1,4 +1,4 @@
-# Control Engineering for Agents — Design Specification
+# Kyber — Design Specification
 
 > **Status**: Phase 0 — Design & Spec
 > **License**: MIT
@@ -398,7 +398,7 @@ Where:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│                    Control Engineering Agent Runtime         │
+│                    Kyber Agent Runtime                      │
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │

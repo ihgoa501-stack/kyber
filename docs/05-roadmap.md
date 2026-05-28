@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-> Phased plan for building the Control Engineering for Agents framework.
+> Phased plan for building the Kyber framework.
 
 ## Phase 0: Foundation (Current)
 **Goal**: Establish theoretical framework and design specification.
