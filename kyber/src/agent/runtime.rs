@@ -49,7 +49,7 @@ pub async fn run(
     }
 
     let mut safety = SafetyLayer::new(max_iterations);
-    let mut observer = Observer::new(confidence_threshold, observer_backend.clone());
+    let mut observer = Observer::new(confidence_threshold, observer_backend.clone(), &task);
     let mut controller = Controller::new(max_iterations, task.clone(), controller_backend.clone());
     let tools = Tools::new();
 
@@ -127,8 +127,10 @@ pub async fn run(
             Err(e) => println!("  失败: {}", e),
         }
 
-        // 6. Record
+        // 6. Record — feed structured data to signal fusion, unstructured to LLM
         let success = result.is_ok();
+        let output_len = result.as_ref().map(|s| s.len()).unwrap_or(0);
+        observer.record_step(success, &action.kind, output_len);
         observer.add_context(format!(
             "[步 {}] {} → {}", safety.iteration_count, action, if success { "ok" } else { "fail" }
         ));
