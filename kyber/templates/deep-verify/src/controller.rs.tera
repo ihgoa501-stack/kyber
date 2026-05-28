@@ -1,1 +1,85 @@
-// Deep-verify agent controller — stub
+use crate::tools::ToolRegistry;
+use super::observer::Observation;
+
+pub struct Controller {
+    max_iterations: u32,
+    steps_taken: u32,
+    done: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Action {
+    pub kind: String,
+    pub description: String,
+    pub params: std::collections::HashMap<String, String>,
+}
+
+impl Action {
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn execute(&self, tools: &ToolRegistry) -> Result<(), String> {
+        match self.kind.as_str() {
+            "read" => {
+                let path = self.params.get("path")
+                    .map(String::as_str)
+                    .unwrap_or("output.txt");
+                tools.read_file(path).map(|_| ())
+            }
+            "write" => {
+                let path = self.params.get("path")
+                    .map(String::as_str)
+                    .unwrap_or("output.txt");
+                let content = self.params.get("content")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                tools.write_file(path, content)
+            }
+            "execute" => {
+                tools.execute_command("echo", &["deep-verify"]).map(|_| ())
+            }
+            "think" => Ok(()),
+            "respond" => {
+                println!("{}", self.description);
+                Ok(())
+            }
+            _ => Err(format!("Unknown action: {}", self.kind)),
+        }
+    }
+}
+
+impl std::fmt::Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.kind, self.description)
+    }
+}
+
+impl Controller {
+    pub fn new(max_iterations: u32) -> Self {
+        Controller { max_iterations, steps_taken: 0, done: false }
+    }
+
+    pub fn decide(&mut self, obs: &Observation) -> Action {
+        self.steps_taken += 1;
+        if self.steps_taken >= self.max_iterations {
+            self.done = true;
+            return Action {
+                kind: "respond".into(),
+                description: "已完成所有步骤。".into(),
+                params: std::collections::HashMap::new(),
+            };
+        }
+        Action {
+            kind: "think".into(),
+            description: format!("deep-verify step {} (confidence: {:.2}, entropy: {:.2})",
+                self.steps_taken, obs.confidence, obs.entropy),
+            params: std::collections::HashMap::new(),
+        }
+    }
+
+    pub fn is_done(&self) -> bool { self.done }
+    pub fn handle_failure(&mut self, _action: &Action) {
+        self.steps_taken = self.steps_taken.saturating_sub(1);
+    }
+}

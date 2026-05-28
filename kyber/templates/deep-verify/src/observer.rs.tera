@@ -1,1 +1,79 @@
-// Deep-verify agent observer — stub
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub struct Observer {
+    confidence_threshold: f64,
+    recent_successes: Vec<bool>,
+    window_size: usize,
+    entropy_estimate: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Observation {
+    pub confidence: f64,
+    pub entropy: f64,
+    pub iteration_saturation: f64,
+    pub timestamp: u64,
+}
+
+impl Observer {
+    pub fn new(confidence_threshold: f64) -> Self {
+        Observer {
+            confidence_threshold,
+            recent_successes: Vec::new(),
+            window_size: 15,
+            entropy_estimate: 0.5,
+        }
+    }
+
+    pub fn observe(&self) -> Observation {
+        let confidence = self.estimate_confidence();
+        Observation {
+            confidence,
+            entropy: self.entropy_estimate,
+            iteration_saturation: 0.0,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        }
+    }
+
+    pub fn record_result(&mut self, success: bool) {
+        self.recent_successes.push(success);
+        if self.recent_successes.len() > self.window_size {
+            self.recent_successes.remove(0);
+        }
+        self.update_entropy();
+    }
+
+    pub fn apply_hint(&mut self, _hint: &str) {
+        self.recent_successes.push(true);
+        self.entropy_estimate *= 0.8;
+        if self.recent_successes.len() > self.window_size {
+            self.recent_successes.remove(0);
+        }
+    }
+
+    fn estimate_confidence(&self) -> f64 {
+        if self.recent_successes.is_empty() {
+            return 0.5;
+        }
+        let successes = self.recent_successes.iter().filter(|&&s| s).count();
+        (successes as f64 / self.recent_successes.len() as f64) * (1.0 - self.entropy_estimate)
+    }
+
+    fn update_entropy(&mut self) {
+        if self.recent_successes.len() < 3 {
+            self.entropy_estimate = 0.5;
+            return;
+        }
+        let successes = self.recent_successes.iter().filter(|&&s| s).count() as f64;
+        let len = self.recent_successes.len() as f64;
+        let p = successes / len;
+        if p <= 0.0 || p >= 1.0 {
+            self.entropy_estimate = 0.1;
+        } else {
+            self.entropy_estimate = -(p * p.ln() + (1.0 - p) * (1.0 - p).ln()).min(1.0);
+        }
+    }
+}

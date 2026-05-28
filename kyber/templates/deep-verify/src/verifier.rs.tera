@@ -1,1 +1,82 @@
-// Deep-verify agent verifier — stub
+use super::controller::Action;
+
+/// Verifier — extra trust layer in deep-verify architecture.
+pub struct Verifier {
+    pre_checks_passed: u64,
+    pre_checks_failed: u64,
+    post_checks_passed: u64,
+    post_checks_failed: u64,
+}
+
+impl Verifier {
+    pub fn new() -> Self {
+        Verifier {
+            pre_checks_passed: 0,
+            pre_checks_failed: 0,
+            post_checks_passed: 0,
+            post_checks_failed: 0,
+        }
+    }
+
+    pub fn pre_verify(&mut self, action: &Action) -> Result<(), String> {
+        match action.kind() {
+            "delete" => {
+                let path = action.params.get("path")
+                    .map(String::as_str)
+                    .unwrap_or("unknown");
+                if path == ".git" || path == "kyber.toml" || path == "Cargo.toml" {
+                    self.pre_checks_failed += 1;
+                    return Err(format!("尝试删除保护文件: {}", path));
+                }
+                self.pre_checks_passed += 1;
+                Ok(())
+            }
+            "write" => {
+                let path = action.params.get("path")
+                    .map(String::as_str)
+                    .unwrap_or("unknown");
+                if path.contains("..") || path.starts_with('/') {
+                    self.pre_checks_failed += 1;
+                    return Err(format!("路径可能不安全: {}", path));
+                }
+                self.pre_checks_passed += 1;
+                Ok(())
+            }
+            "execute" => {
+                let cmd = action.params.get("command")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                if cmd.contains("rm -rf") || cmd.contains("sudo") {
+                    self.pre_checks_failed += 1;
+                    return Err(format!("高危命令: {}", cmd));
+                }
+                self.pre_checks_passed += 1;
+                Ok(())
+            }
+            _ => {
+                self.pre_checks_passed += 1;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn post_verify(&mut self, action: &Action, result: &Result<(), String>) -> Result<(), String> {
+        match result {
+            Ok(()) => {
+                self.post_checks_passed += 1;
+                Ok(())
+            }
+            Err(e) => {
+                self.post_checks_failed += 1;
+                Err(format!("执行失败: {}", e))
+            }
+        }
+    }
+
+    pub fn print_stats(&self) {
+        println!("  Pre-verify:  {} passed, {} failed",
+            self.pre_checks_passed, self.pre_checks_failed);
+        println!("  Post-verify: {} passed, {} failed",
+            self.post_checks_passed, self.post_checks_failed);
+    }
+}
