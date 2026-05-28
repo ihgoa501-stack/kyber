@@ -1,18 +1,13 @@
+/// Main control loop — hierarchical (L3 → L2 → L1).
+///
+/// L3 (Strategic): Planner generates sub-tasks from user task (slow, conservative).
+/// L2 (Tactical):  Each sub-task runs its own control loop (observe→decide→execute).
+/// L1 (Operational): Tools execute atomic actions.
 use colored::Colorize;
-use super::observer::Observer;
-use super::controller::Controller;
 use super::tools::Tools;
-use super::safety_layer::SafetyLayer;
-use super::adaptation::AdaptationState;
+use super::planner;
 use super::llm::Backend;
 
-/// Main control loop — the heart of Kyber Agent.
-/// Controller and observer use independent LLM backends (Separation Principle).
-///
-/// Controller backend: KYBER_CONTROLLER_API_KEY, KYBER_CONTROLLER_PROVIDER, KYBER_CONTROLLER_MODEL
-/// Observer backend:   KYBER_OBSERVER_API_KEY, KYBER_OBSERVER_PROVIDER, KYBER_OBSERVER_MODEL
-///
-/// Falls back to KYBER_CONTROLLER_* if only one is configured (single-LLM mode).
 pub async fn run(
     task: String,
     max_iterations: u32,
@@ -20,10 +15,8 @@ pub async fn run(
     observer_provider: Option<String>,
     observer_model: Option<String>,
 ) -> anyhow::Result<()> {
-    // Controller backend
     let controller_backend = Backend::from_env("controller")?;
 
-    // Observer backend — if explicitly configured, use it. Otherwise reuse controller.
     let observer_backend = if std::env::var("KYBER_OBSERVER_API_KEY").is_ok() {
         let mut b = Backend::from_env("observer")?;
         b.name = "observer".into();
@@ -38,156 +31,125 @@ pub async fn run(
         }
         b
     } else {
-        // Fall back to controller backend — single LLM mode, but with a note
         let mut b = controller_backend.clone();
         b.name = "observer (shared with controller)".into();
         b
     };
 
-    let single_llm = std::env::var("KYBER_OBSERVER_API_KEY").is_err();
-    if single_llm {
-        println!("{} 控制器和观测器共享同一个 LLM（设置 KYBER_OBSERVER_API_KEY 启用分离）", "ℹ".dimmed());
+    if std::env::var("KYBER_OBSERVER_API_KEY").is_err() {
+        println!("{} 控制器和观测器共享同一个 LLM", "ℹ".dimmed());
     }
 
-    let mut safety = SafetyLayer::new(max_iterations);
-    let mut observer = Observer::new(confidence_threshold, observer_backend.clone(), &task);
-    let mut controller = Controller::new(max_iterations, task.clone(), controller_backend.clone());
-    let mut adaptation = AdaptationState::new();
-    let tools = Tools::new();
-
-    println!("\n{} Kyber Agent 已启动", "═══".cyan().bold());
+    println!("\n{} Kyber Agent 已启动 (分层控制)", "═══".cyan().bold());
     println!("任务: {}", task);
-    println!("最大步数: {}", max_iterations);
-    println!("置信度门限: {}", confidence_threshold);
-    println!("控制器: [{}] {} ({})",
-        match controller_backend.provider { super::llm::Provider::Anthropic => "Anthropic", super::llm::Provider::OpenAI => "OpenAI" },
-        controller_backend.model,
-        controller_backend.name,
-    );
-    println!("观测器: [{}] {} ({})\n",
-        match observer_backend.provider { super::llm::Provider::Anthropic => "Anthropic", super::llm::Provider::OpenAI => "OpenAI" },
-        observer_backend.model,
-        observer_backend.name,
-    );
+    println!("控制器: [{}] {}", controller_backend.model, controller_backend.name);
+    println!("观测器: [{}] {}\n", observer_backend.model, observer_backend.name);
 
-    // Set initial context
-    observer.add_context(format!("任务: {}", task));
+    // ── L3: Strategic Planning ──
+    println!("{} 战略规划 (L3)", "┌─".cyan());
+    let mut plan = planner::generate_plan(&controller_backend, &task).await?;
 
-    loop {
-        safety.advance();
-        println!("[步 {}]", safety.iteration_count);
+    println!("│ 计划: {} 个子任务", plan.subtasks.len());
+    for st in &plan.subtasks {
+        println!("│   {}. {}", st.id, st.description);
+    }
+    println!("{}", "└─".cyan());
 
-        // 1. Observe
-        let observation = observer.observe().await;
+    let tools = Tools::new();
+    let mut total_steps = 0u32;
 
-        // 1a. Adapt — feed confidence to gain scheduler
-        adaptation.update(observation.confidence);
-        adaptation.print_status(observation.confidence, 0.0);
-        println!("  诊断: {}", observation.summary);
+    // ── L2: Execute each sub-task ──
+    let mut completed = 0u32;
+    let mut failed = 0u32;
+    let subtask_count = plan.subtasks.len();
 
-        // 1b. Double-observe in conservative/safe mode
-        if adaptation.should_double_observe() {
-            let second = observer.observe().await;
-            println!("  二次观测: {:.2}", second.confidence);
-        }
-
-        // Print signal breakdown
-        print!("  信号: ");
-        for (name, score, weight) in &observation.breakdown {
-            let color = if *score > 0.7 { score.to_string().green() }
-                else if *score < 0.4 { score.to_string().red() }
-                else { score.to_string().yellow() };
-            print!("{}={} (×{:.0}%)  ", name, color, weight * 100.0);
-        }
-        println!();
-
-        // 2. Confidence gate
-        if observation.confidence < confidence_threshold {
-            println!("  {} 置信度偏低，请示用户", "⚠".yellow());
-            println!("  问题: {}", observation.summary);
-            print!("  请指导: ");
-            use std::io::Write;
-            std::io::stdout().flush().ok();
-            let mut hint = String::new();
-            std::io::stdin().read_line(&mut hint).ok();
-            let hint = hint.trim().to_string();
-            if !hint.is_empty() {
-                observer.add_context(format!("用户指导: {}", hint));
-            }
-            continue;
-        }
-
-        // 3. Decide
-        let action = controller.decide(&observation).await;
-        println!("  决策: {}", action);
-
-        if controller.is_done() {
-            println!("\n{} 任务完成", "✓".green());
-            safety.print_report();
+    for i in 0..subtask_count {
+        if total_steps >= max_iterations {
+            println!("\n{} 达到最大步数 ({}), 停止。", "■".red(), max_iterations);
             break;
         }
 
-        // 4. Safety check — pre-verify, modulated by adaptation mode
-        let confirm_needed = if adaptation.confirm_all() {
-            true // Safe mode: confirm everything
-        } else if adaptation.skip_confirm_for_safe() {
-            action.needs_confirm() // Aggressive: only confirm truly dangerous
-        } else {
-            action.needs_confirm() // Nominal/Conservative: standard check
+        // Execute one sub-task
+        planner::execute_subtask(
+            &mut plan.subtasks[i],
+            &controller_backend,
+            &observer_backend,
+            confidence_threshold,
+            &tools,
+        ).await;
+
+        total_steps += plan.subtasks[i].steps_used;
+
+        match &plan.subtasks[i].status {
+            planner::SubTaskStatus::Complete => {
+                completed += 1;
+            }
+            planner::SubTaskStatus::Failed(reason) => {
+                failed += 1;
+                println!("  {} 子任务 {} 失败: {}", "■".red(), plan.subtasks[i].id, reason);
+
+                // L3 re-planning: ask LLM if remaining tasks need adjustment
+                if i + 1 < subtask_count {
+                    let context = format!(
+                        "原任务: {}\n已完成: {}\n失败: 子任务 {} ({})\n剩余: {:?}\n需要调整计划吗? 输出 JSON: {{\"adjust\": true, \"new_subtasks\": [{{\"id\": {}, \"description\": \"...\", \"max_steps\": 5}}]}} 或 {{\"adjust\": false}}",
+                        task,
+                        plan.subtasks.iter().filter(|s| matches!(s.status, planner::SubTaskStatus::Complete)).map(|s| s.description.as_str()).collect::<Vec<_>>().join("; "),
+                        plan.subtasks[i].id,
+                        reason,
+                        &plan.subtasks[i+1..].iter().map(|s| s.description.as_str()).collect::<Vec<_>>(),
+                        plan.subtasks.last().map(|s| s.id).unwrap_or(0) + 1,
+                    );
+
+                    let replan_sys = "你是战略规划器。评估是否需要在失败后调整计划。只输出 JSON。";
+                    if let Ok(response) = super::llm::call(&controller_backend, replan_sys, &context).await {
+                        if let Some(json) = extract_json(&response) {
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json) {
+                                if parsed.get("adjust").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    if let Some(new_sts) = parsed.get("new_subtasks").and_then(|v| v.as_array()) {
+                                        let adjusted: Vec<planner::SubTask> = new_sts.iter().enumerate().map(|(j, st)| {
+                                            planner::SubTask {
+                                                id: plan.subtasks[i].id + j as u32 + 1,
+                                                description: st["description"].as_str().unwrap_or("").into(),
+                                                status: planner::SubTaskStatus::Pending,
+                                                result: None,
+                                                steps_used: 0,
+                                            }
+                                        }).collect();
+                                        println!("  {} 计划已调整: {} 个新子任务", "↻".yellow(), adjusted.len());
+                                        plan.subtasks.truncate(i + 1);
+                                        plan.subtasks.extend(adjusted);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ── Final Report ──
+    println!("\n{} 分层执行报告 ═══", "═══".cyan().bold());
+    println!("总步数: {}", total_steps);
+    println!("完成: {} / 失败: {}", completed, failed);
+    for st in &plan.subtasks {
+        let status = match &st.status {
+            planner::SubTaskStatus::Complete => "✓".green(),
+            planner::SubTaskStatus::Failed(_) => "✗".red(),
+            _ => "…".dimmed(),
         };
-
-        if confirm_needed {
-            print!("  执行 [{}]? [Y/n]: ", action.kind);
-            use std::io::Write;
-            std::io::stdout().flush().ok();
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input).ok();
-            if input.trim().to_lowercase() == "n" {
-                println!("  已取消");
-                observer.add_context(format!("用户拒绝: [{}] {}", action.kind, action.description));
-                continue;
-            }
-        }
-
-        // 5. Execute
-        println!("  执行: {}", action.description);
-        let result = tools.execute_action(&action);
-        match &result {
-            Ok(out) => println!("  结果: {} 字节", out.len()),
-            Err(e) => println!("  失败: {}", e),
-        }
-
-        // 6. Record — feed structured data to signal fusion, unstructured to LLM
-        let success = result.is_ok();
-        let output_len = result.as_ref().map(|s| s.len()).unwrap_or(0);
-        observer.record_step(success, &action.kind, output_len);
-        observer.add_context(format!(
-            "[步 {}] {} → {}", safety.iteration_count, action, if success { "ok" } else { "fail" }
-        ));
-
-        let ok = safety.record(&action.kind, success);
-        if !ok {
-            println!("  {} 熔断触发！", "✗".red());
-            safety.print_report();
-            break;
-        }
-
-        // 7. Handle failure
-        if !success {
-            controller.handle_failure(&action);
-        }
-
-        // 8. Check termination
-        if controller.is_done() || safety.should_terminate() {
-            if safety.should_terminate() {
-                println!("\n{} 达到上限 ({} 步)，停止。", "■".red(), max_iterations);
-            } else {
-                println!("\n{} 任务完成", "✓".green());
-            }
-            safety.print_report();
-            break;
-        }
+        println!("  {} [{}] {} ({} 步)", status, st.id, st.description, st.steps_used);
     }
 
     Ok(())
+}
+
+fn extract_json(text: &str) -> Option<String> {
+    if let Some(start) = text.find('{') {
+        if let Some(end) = text.rfind('}') {
+            return Some(text[start..=end].to_string());
+        }
+    }
+    None
 }

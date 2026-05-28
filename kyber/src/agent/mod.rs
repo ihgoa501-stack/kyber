@@ -4,4 +4,5 @@ pub mod controller;
 pub mod tools;
 pub mod safety_layer;
 pub mod adaptation;
+pub mod planner;
 pub mod runtime;
