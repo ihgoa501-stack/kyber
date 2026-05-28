@@ -1,12 +1,14 @@
-/Users/lc/agent-control-engineering/kyber/target/debug/deps/kyber-edda8a5dfbd73529.d: src/lib.rs src/cli.rs src/config/mod.rs src/config/types.rs src/dialogue.rs src/codegen.rs src/analysis.rs
+/Users/lc/agent-control-engineering/kyber/target/debug/deps/kyber-edda8a5dfbd73529.d: src/lib.rs src/cli.rs src/config/mod.rs src/config/types.rs src/dialogue/mod.rs src/dialogue/rounds.rs src/dialogue/interpreter.rs src/codegen.rs src/analysis.rs
 
-/Users/lc/agent-control-engineering/kyber/target/debug/deps/kyber-edda8a5dfbd73529: src/lib.rs src/cli.rs src/config/mod.rs src/config/types.rs src/dialogue.rs src/codegen.rs src/analysis.rs
+/Users/lc/agent-control-engineering/kyber/target/debug/deps/kyber-edda8a5dfbd73529: src/lib.rs src/cli.rs src/config/mod.rs src/config/types.rs src/dialogue/mod.rs src/dialogue/rounds.rs src/dialogue/interpreter.rs src/codegen.rs src/analysis.rs
 
 src/lib.rs:
 src/cli.rs:
 src/config/mod.rs:
 src/config/types.rs:
-src/dialogue.rs:
+src/dialogue/mod.rs:
+src/dialogue/rounds.rs:
+src/dialogue/interpreter.rs:
 src/codegen.rs:
 src/analysis.rs:
 

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use crate::dialogue::Answers;
+use crate::config::types::DialogueAnswers;
 use anyhow::Result;
 
-pub fn generate_project(_answers: &Answers) -> Result<PathBuf> {
+pub fn generate_project(_answers: &DialogueAnswers) -> Result<PathBuf> {
     Ok(PathBuf::from("."))
 }
