@@ -44,9 +44,7 @@ pub async fn generate_plan(backend: &Backend, task: &str) -> anyhow::Result<Plan
 }
 规则:
 - 每个子任务应该是可独立执行的原子操作
-- max_steps 根据难度: 简单=3, 中等=5, 复杂=8
-- 子任务之间应该有序依赖关系
-- 最多 6 个子任务
+- 最多 3 个子任务。简单任务 1 个就够了
 - 不要输出除 JSON 以外的任何内容"#;
 
     let response = call(backend, sys, task).await?;
@@ -83,16 +81,16 @@ pub async fn generate_plan(backend: &Backend, task: &str) -> anyhow::Result<Plan
 }
 
 /// Execute a single sub-task using the tactical control loop (L2).
-/// Returns the sub-task result.
 pub async fn execute_subtask(
     subtask: &mut SubTask,
     controller_backend: &Backend,
     observer_backend: &Backend,
     confidence_threshold: f64,
     tools: &Tools,
+    budget: u32,
 ) {
     subtask.status = SubTaskStatus::InProgress;
-    let max_iterations = 8; // per sub-task, not per whole plan
+    let max_iterations = budget;
 
     let mut safety = SafetyLayer::new(max_iterations);
     let mut observer = Observer::new(confidence_threshold, observer_backend.clone(), &subtask.description);
@@ -109,6 +107,22 @@ pub async fn execute_subtask(
 
         let observation = observer.observe().await;
         adaptation.update(observation.confidence);
+
+        // How 1: adaptation-driven early termination
+        if matches!(adaptation.mode, super::adaptation::OperatingMode::Safe) {
+            subtask.status = SubTaskStatus::Failed("适应器切换至安全模式".into());
+            subtask.steps_used = safety.iteration_count;
+            println!("  {} 安全模式: 终止子任务", "■".red());
+            return;
+        }
+        if matches!(adaptation.mode, super::adaptation::OperatingMode::Conservative)
+            && safety.iteration_count > max_iterations / 2
+        {
+            subtask.status = SubTaskStatus::Failed("保守模式下提前终止".into());
+            subtask.steps_used = safety.iteration_count;
+            println!("  {} 保守模式: 提前终止", "⚠".yellow());
+            return;
+        }
 
         if observation.confidence < confidence_threshold {
             if adaptation.mode == super::adaptation::OperatingMode::Safe {
@@ -145,7 +159,12 @@ pub async fn execute_subtask(
         let success = result.is_ok();
         let output_len = result.as_ref().map(|s| s.len()).unwrap_or(0);
 
-        observer.record_step(success, &action.kind, output_len);
+        // How 2: quality scoring — short useless output = bad signal
+        let is_low_quality = success && output_len < 20
+            && matches!(action.kind.as_str(), "execute" | "respond");
+        let effective_success = success && !is_low_quality;
+
+        observer.record_step(effective_success, &action.kind, output_len);
         observer.add_context(format!(
             "L2[{}] {} → {}", safety.iteration_count, action, if success { "ok" } else { "fail" }
         ));

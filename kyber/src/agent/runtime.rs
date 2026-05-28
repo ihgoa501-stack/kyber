@@ -63,12 +63,16 @@ pub async fn run(
     let mut completed = 0u32;
     let mut failed = 0u32;
     let subtask_count = plan.subtasks.len();
+    let budget_per_task = (max_iterations / subtask_count as u32).max(3);
 
     for i in 0..subtask_count {
         if total_steps >= max_iterations {
             println!("\n{} 达到最大步数 ({}), 停止。", "■".red(), max_iterations);
             break;
         }
+
+        let remaining = max_iterations.saturating_sub(total_steps);
+        let budget = budget_per_task.min(remaining);
 
         // Execute one sub-task
         planner::execute_subtask(
@@ -77,6 +81,7 @@ pub async fn run(
             &observer_backend,
             confidence_threshold,
             &tools,
+            budget,
         ).await;
 
         total_steps += plan.subtasks[i].steps_used;
