@@ -5,10 +5,11 @@ use serde::{Deserialize, Serialize};
 // Controller and observer use independent backends (Separation Principle).
 // Each backend has its own API key, provider, and model.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Provider {
     Anthropic,
     OpenAI,
+    DeepSeek,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +30,7 @@ impl Backend {
 
         let provider = match provider_str.as_str() {
             "openai" => Provider::OpenAI,
+            "deepseek" => Provider::DeepSeek,
             _ => Provider::Anthropic,
         };
 
@@ -39,6 +41,7 @@ impl Backend {
         let default_model = match provider {
             Provider::Anthropic => "claude-sonnet-4-20250514",
             Provider::OpenAI => "gpt-4o",
+            Provider::DeepSeek => "deepseek-chat",
         };
         let model = std::env::var(format!("{}MODEL", prefix))
             .unwrap_or_else(|_| default_model.into());
@@ -51,7 +54,8 @@ impl Backend {
 pub async fn call(backend: &Backend, system: &str, prompt: &str) -> Result<String> {
     match backend.provider {
         Provider::Anthropic => call_anthropic(backend, system, prompt).await,
-        Provider::OpenAI => call_openai(backend, system, prompt).await,
+        Provider::OpenAI => call_openai(backend, prompt, system, "https://api.openai.com/v1/chat/completions").await,
+        Provider::DeepSeek => call_openai(backend, prompt, system, "https://api.deepseek.com/chat/completions").await,
     }
 }
 
@@ -144,7 +148,7 @@ struct OpenAIMessageContent {
     content: String,
 }
 
-async fn call_openai(backend: &Backend, system: &str, prompt: &str) -> Result<String> {
+async fn call_openai(backend: &Backend, prompt: &str, system: &str, base_url: &str) -> Result<String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()?;
@@ -161,7 +165,7 @@ async fn call_openai(backend: &Backend, system: &str, prompt: &str) -> Result<St
     };
 
     let response = client
-        .post("https://api.openai.com/v1/chat/completions")
+        .post(base_url)
         .header("Authorization", format!("Bearer {}", backend.api_key))
         .header("content-type", "application/json")
         .json(&request)
@@ -171,7 +175,7 @@ async fn call_openai(backend: &Backend, system: &str, prompt: &str) -> Result<St
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
-        return Err(anyhow!("OpenAI {} ({}): {}", backend.model, status, text));
+        return Err(anyhow!("{:?} {} ({}): {}", backend.provider, backend.model, status, text));
     }
 
     let body: OpenAIResponse = response.json().await?;

@@ -23,6 +23,7 @@ pub async fn run(
         if let Some(p) = observer_provider {
             b.provider = match p.as_str() {
                 "openai" => super::llm::Provider::OpenAI,
+                "deepseek" => super::llm::Provider::DeepSeek,
                 _ => super::llm::Provider::Anthropic,
             };
         }
