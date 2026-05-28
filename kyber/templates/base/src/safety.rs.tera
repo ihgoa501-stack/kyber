@@ -1,0 +1,89 @@
+use std::time::{Duration, Instant};
+
+/// Safety layer — the trust backbone of this Agent.
+pub struct SafetyLayer {
+    pub iteration_count: u32,
+    pub max_iterations: u32,
+    failure_count: u32,
+    failure_window: Vec<Instant>,
+    circuit_breaker_threshold: u32,
+    circuit_breaker_window_secs: u64,
+    circuit_open: bool,
+    require_confirm: Vec<String>,
+    audit_log: Vec<AuditEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditEntry {
+    pub step: u32,
+    pub confidence: f64,
+    pub decision: String,
+    pub result: String,
+    pub timestamp: std::time::SystemTime,
+}
+
+impl SafetyLayer {
+    pub fn new(
+        max_iterations: u32,
+        circuit_breaker: &str,
+        require_confirm: &[String],
+    ) -> Self {
+        let parts: Vec<&str> = circuit_breaker.splitn(4, ' ').collect();
+        let threshold: u32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(3);
+        let window: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(60);
+
+        SafetyLayer {
+            iteration_count: 0,
+            max_iterations,
+            failure_count: 0,
+            failure_window: Vec::new(),
+            circuit_breaker_threshold: threshold,
+            circuit_breaker_window_secs: window,
+            circuit_open: false,
+            require_confirm: require_confirm.to_vec(),
+            audit_log: Vec::new(),
+        }
+    }
+
+    pub fn should_terminate(&self) -> bool {
+        self.iteration_count >= self.max_iterations || self.circuit_open
+    }
+
+    pub fn advance_step(&mut self) {
+        self.iteration_count += 1;
+    }
+
+    pub fn needs_confirm(&self, action_kind: &str) -> bool {
+        self.require_confirm.contains(&action_kind.to_string())
+    }
+
+    pub fn record_result(&mut self, action: &str, success: bool) -> bool {
+        self.audit_log.push(AuditEntry {
+            step: self.iteration_count,
+            confidence: 0.0,
+            decision: action.to_string(),
+            result: if success { "ok".into() } else { "fail".into() },
+            timestamp: std::time::SystemTime::now(),
+        });
+
+        if !success {
+            self.failure_count += 1;
+            self.failure_window.push(Instant::now());
+            let cutoff = Instant::now() - Duration::from_secs(self.circuit_breaker_window_secs);
+            self.failure_window.retain(|t| *t > cutoff);
+
+            if self.failure_window.len() as u32 >= self.circuit_breaker_threshold {
+                self.circuit_open = true;
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn print_report(&self) {
+        println!("\n═══ Audit Report ═══");
+        println!("Steps executed: {}", self.iteration_count);
+        println!("Failures: {}", self.failure_count);
+        println!("Circuit open: {}", self.circuit_open);
+    }
+}

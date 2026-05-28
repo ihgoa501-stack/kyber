@@ -1,0 +1,18 @@
+[package]
+name = "{{ agent_name }}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+anyhow = "1"
+{% if has_browser %}
+headless_chrome = "1.0"
+{% endif %}
+{% if has_desktop %}
+enigo = "0.2"
+{% endif %}
+{% if has_git %}
+git2 = "0.19"
+{% endif %}
