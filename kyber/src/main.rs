@@ -18,6 +18,12 @@ fn main() -> Result<()> {
             let report = kyber::analysis::check_project(&path)?;
             println!("{}", report);
         }
+        Commands::Run { task, max_iterations, confidence } => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                kyber::agent::runtime::run(task, max_iterations, confidence).await
+            })?;
+        }
     }
 
     Ok(())

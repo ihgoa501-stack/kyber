@@ -24,4 +24,15 @@ pub enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Execute a task using the Kyber Agent runtime
+    Run {
+        /// Task description
+        task: String,
+        /// Max iterations
+        #[arg(long, default_value = "25")]
+        max_iterations: u32,
+        /// Confidence threshold (0.0-1.0)
+        #[arg(long, default_value = "0.5")]
+        confidence: f64,
+    },
 }
