@@ -153,3 +153,111 @@ fn extract_json(text: &str) -> Option<String> {
     }
     None
 }
+
+/// Interactive chat session — wraps the hierarchical runtime in a readline loop.
+/// Maintains context across turns so follow-up questions work naturally.
+pub async fn chat(
+    initial_task: String,
+    max_iterations: u32,
+    confidence_threshold: f64,
+) -> anyhow::Result<()> {
+    use colored::Colorize;
+    use std::io::{self, Write};
+
+    println!();
+    println!("{}", "╔══════════════════════════════════════╗".cyan());
+    println!("{}", "║         Kyber Agent                  ║".cyan().bold());
+    println!("{}", "║   工程控制论驱动的可信 AI Agent       ║".cyan());
+    println!("{}", "╠══════════════════════════════════════╣".cyan());
+    println!("{}", "║  输入任务开始，输入 /help 查看帮助     ║".cyan());
+    println!("{}", "╚══════════════════════════════════════╝".cyan());
+    println!();
+
+    let mut context: Vec<String> = Vec::new();
+    let mut turn = 0u32;
+
+    // If there's an initial task, run it first
+    let mut first_task = if !initial_task.is_empty() {
+        Some(initial_task)
+    } else {
+        None
+    };
+
+    loop {
+        // Get task from user
+        let task = if let Some(t) = first_task.take() {
+            println!("{} {}", "▶".green(), t);
+            t
+        } else {
+            print!("{} ", "▶".green());
+            io::stdout().flush()?;
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let input = input.trim().to_string();
+
+            if input.is_empty() {
+                continue;
+            }
+
+            match input.as_str() {
+                "/help" => {
+                    println!("  命令:");
+                    println!("    直接输入任务  — 让 Kyber 执行");
+                    println!("    /help         — 显示帮助");
+                    println!("    /context      — 显示当前上下文摘要");
+                    println!("    /clear        — 清除对话上下文");
+                    println!("    /exit         — 退出");
+                    continue;
+                }
+                "/context" => {
+                    if context.is_empty() {
+                        println!("  (无上下文)");
+                    } else {
+                        println!("  上下文 (最近 10 条):");
+                        for c in context.iter().rev().take(10) {
+                            println!("    {}", c.dimmed());
+                        }
+                    }
+                    continue;
+                }
+                "/clear" => {
+                    context.clear();
+                    turn = 0;
+                    println!("  上下文已清除。");
+                    continue;
+                }
+                "/exit" | "/quit" | "/q" => {
+                    println!("  再见。");
+                    break;
+                }
+                _ => input,
+            }
+        };
+
+        turn += 1;
+
+        // If we have context, prepend it so the agent knows what happened before
+        let task_with_context = if context.is_empty() {
+            task.clone()
+        } else {
+            let recent: Vec<String> = context.iter().rev().take(5).cloned().collect();
+            format!("对话历史:\n{}\n\n当前任务: {}", recent.join("\n"), task)
+        };
+
+        // Run the task using the full hierarchical runtime
+        run(
+            task_with_context,
+            max_iterations,
+            confidence_threshold,
+            None,
+            None,
+        ).await?;
+
+        // Store context for next turn
+        context.push(format!("[第 {} 轮] {}", turn, task));
+
+        println!();
+    }
+
+    Ok(())
+}

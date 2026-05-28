@@ -24,6 +24,12 @@ fn main() -> Result<()> {
                 kyber::agent::runtime::run(task, max_iterations, confidence, observer_provider, observer_model).await
             })?;
         }
+        Commands::Chat { task, max_iterations, confidence } => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                kyber::agent::runtime::chat(task, max_iterations, confidence).await
+            })?;
+        }
     }
 
     Ok(())

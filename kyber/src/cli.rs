@@ -41,4 +41,16 @@ pub enum Commands {
         #[arg(long)]
         observer_model: Option<String>,
     },
+    /// Interactive chat session with the Kyber Agent
+    Chat {
+        /// Initial task (optional, can enter tasks interactively)
+        #[arg(default_value = "")]
+        task: String,
+        /// Max iterations per task
+        #[arg(long, default_value = "25")]
+        max_iterations: u32,
+        /// Confidence threshold (0.0-1.0)
+        #[arg(long, default_value = "0.5")]
+        confidence: f64,
+    },
 }
