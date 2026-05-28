@@ -34,5 +34,11 @@ pub enum Commands {
         /// Confidence threshold (0.0-1.0)
         #[arg(long, default_value = "0.5")]
         confidence: f64,
+        /// Observer provider (anthropic | openai), separate from controller
+        #[arg(long)]
+        observer_provider: Option<String>,
+        /// Observer model override
+        #[arg(long)]
+        observer_model: Option<String>,
     },
 }

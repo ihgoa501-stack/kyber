@@ -3,26 +3,70 @@ use super::observer::Observer;
 use super::controller::Controller;
 use super::tools::Tools;
 use super::safety_layer::SafetyLayer;
+use super::llm::Backend;
 
 /// Main control loop — the heart of Kyber Agent.
-/// observe → confidence gate → decide → safety → execute → verify → record → loop
-pub async fn run(task: String, max_iterations: u32, confidence_threshold: f64) -> anyhow::Result<()> {
-    // Check for API key
-    if std::env::var("ANTHROPIC_API_KEY").is_err() {
-        println!("{} 需要设置 ANTHROPIC_API_KEY 环境变量才能运行", "⚠".yellow());
-        println!("  export ANTHROPIC_API_KEY=sk-ant-...");
-        return Ok(());
+/// Controller and observer use independent LLM backends (Separation Principle).
+///
+/// Controller backend: KYBER_CONTROLLER_API_KEY, KYBER_CONTROLLER_PROVIDER, KYBER_CONTROLLER_MODEL
+/// Observer backend:   KYBER_OBSERVER_API_KEY, KYBER_OBSERVER_PROVIDER, KYBER_OBSERVER_MODEL
+///
+/// Falls back to KYBER_CONTROLLER_* if only one is configured (single-LLM mode).
+pub async fn run(
+    task: String,
+    max_iterations: u32,
+    confidence_threshold: f64,
+    observer_provider: Option<String>,
+    observer_model: Option<String>,
+) -> anyhow::Result<()> {
+    // Controller backend
+    let controller_backend = Backend::from_env("controller")?;
+
+    // Observer backend — if explicitly configured, use it. Otherwise reuse controller.
+    let observer_backend = if std::env::var("KYBER_OBSERVER_API_KEY").is_ok() {
+        let mut b = Backend::from_env("observer")?;
+        b.name = "observer".into();
+        if let Some(p) = observer_provider {
+            b.provider = match p.as_str() {
+                "openai" => super::llm::Provider::OpenAI,
+                _ => super::llm::Provider::Anthropic,
+            };
+        }
+        if let Some(m) = observer_model {
+            b.model = m;
+        }
+        b
+    } else {
+        // Fall back to controller backend — single LLM mode, but with a note
+        let mut b = controller_backend.clone();
+        b.name = "observer (shared with controller)".into();
+        b
+    };
+
+    let single_llm = std::env::var("KYBER_OBSERVER_API_KEY").is_err();
+    if single_llm {
+        println!("{} 控制器和观测器共享同一个 LLM（设置 KYBER_OBSERVER_API_KEY 启用分离）", "ℹ".dimmed());
     }
 
     let mut safety = SafetyLayer::new(max_iterations);
-    let mut observer = Observer::new(confidence_threshold);
-    let mut controller = Controller::new(max_iterations, task.clone());
+    let mut observer = Observer::new(confidence_threshold, observer_backend.clone());
+    let mut controller = Controller::new(max_iterations, task.clone(), controller_backend.clone());
     let tools = Tools::new();
 
     println!("\n{} Kyber Agent 已启动", "═══".cyan().bold());
     println!("任务: {}", task);
     println!("最大步数: {}", max_iterations);
-    println!("置信度门限: {}\n", confidence_threshold);
+    println!("置信度门限: {}", confidence_threshold);
+    println!("控制器: [{}] {} ({})",
+        match controller_backend.provider { super::llm::Provider::Anthropic => "Anthropic", super::llm::Provider::OpenAI => "OpenAI" },
+        controller_backend.model,
+        controller_backend.name,
+    );
+    println!("观测器: [{}] {} ({})\n",
+        match observer_backend.provider { super::llm::Provider::Anthropic => "Anthropic", super::llm::Provider::OpenAI => "OpenAI" },
+        observer_backend.model,
+        observer_backend.name,
+    );
 
     // Set initial context
     observer.add_context(format!("任务: {}", task));

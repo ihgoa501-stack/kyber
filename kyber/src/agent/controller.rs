@@ -1,4 +1,5 @@
 use super::observer::Observation;
+use super::llm::Backend;
 
 #[derive(Debug, Clone)]
 pub struct Action {
@@ -28,11 +29,12 @@ pub struct Controller {
     pub steps_taken: u32,
     pub done: bool,
     pub task: String,
+    pub backend: Backend,
 }
 
 impl Controller {
-    pub fn new(max_iterations: u32, task: String) -> Self {
-        Controller { max_iterations, steps_taken: 0, done: false, task }
+    pub fn new(max_iterations: u32, task: String, backend: Backend) -> Self {
+        Controller { max_iterations, steps_taken: 0, done: false, task, backend }
     }
 
     /// Decide next action using LLM.
@@ -55,7 +57,7 @@ impl Controller {
                 "任务: {}\n当前状态: {}\n问题: {:?}\n这个任务完成了吗？只回答 DONE 或 CONTINUE",
                 self.task, obs.summary, obs.issues
             );
-            if let Ok(response) = super::llm::call(&done_prompt, "你决定任务是否完成。只输出 DONE 或 CONTINUE。").await {
+            if let Ok(response) = super::llm::call(&self.backend,&done_prompt, "你决定任务是否完成。只输出 DONE 或 CONTINUE。").await {
                 if response.trim().contains("DONE") {
                     self.done = true;
                     return Action {
@@ -86,7 +88,7 @@ impl Controller {
             self.task, self.steps_taken, self.max_iterations, obs.summary, obs.issues
         );
 
-        match super::llm::call(&action_prompt, sys_prompt).await {
+        match super::llm::call(&self.backend,&action_prompt, sys_prompt).await {
             Ok(text) => {
                 if let Some(json_str) = extract_json(&text) {
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {

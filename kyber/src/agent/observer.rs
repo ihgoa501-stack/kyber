@@ -1,8 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
-use super::llm;
+use super::llm::Backend;
 
 pub struct Observer {
     pub confidence_threshold: f64,
+    pub backend: Backend,
     context: Vec<String>,
 }
 
@@ -15,9 +16,10 @@ pub struct Observation {
 }
 
 impl Observer {
-    pub fn new(confidence_threshold: f64) -> Self {
+    pub fn new(confidence_threshold: f64, backend: Backend) -> Self {
         Observer {
             confidence_threshold,
+            backend,
             context: Vec::new(),
         }
     }
@@ -44,7 +46,7 @@ impl Observer {
 
         let sys = "你是一个 AI Agent 的观测器。评估当前状态，输出 JSON: {\"confidence\": 0.0-1.0, \"summary\": \"一句话总结\", \"issues\": [\"问题1\"]}";
 
-        match llm::call(&prompt, sys).await {
+        match super::llm::call(&self.backend, sys, &prompt).await {
             Ok(text) => {
                 // Try to parse JSON from response
                 if let Some(json_str) = extract_json(&text) {
