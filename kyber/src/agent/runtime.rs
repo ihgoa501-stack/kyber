@@ -3,6 +3,7 @@ use super::observer::Observer;
 use super::controller::Controller;
 use super::tools::Tools;
 use super::safety_layer::SafetyLayer;
+use super::adaptation::AdaptationState;
 use super::llm::Backend;
 
 /// Main control loop — the heart of Kyber Agent.
@@ -51,6 +52,7 @@ pub async fn run(
     let mut safety = SafetyLayer::new(max_iterations);
     let mut observer = Observer::new(confidence_threshold, observer_backend.clone(), &task);
     let mut controller = Controller::new(max_iterations, task.clone(), controller_backend.clone());
+    let mut adaptation = AdaptationState::new();
     let tools = Tools::new();
 
     println!("\n{} Kyber Agent 已启动", "═══".cyan().bold());
@@ -77,7 +79,27 @@ pub async fn run(
 
         // 1. Observe
         let observation = observer.observe().await;
-        println!("  置信度: {:.2} — {}", observation.confidence, observation.summary);
+
+        // 1a. Adapt — feed confidence to gain scheduler
+        adaptation.update(observation.confidence);
+        adaptation.print_status(observation.confidence, 0.0);
+        println!("  诊断: {}", observation.summary);
+
+        // 1b. Double-observe in conservative/safe mode
+        if adaptation.should_double_observe() {
+            let second = observer.observe().await;
+            println!("  二次观测: {:.2}", second.confidence);
+        }
+
+        // Print signal breakdown
+        print!("  信号: ");
+        for (name, score, weight) in &observation.breakdown {
+            let color = if *score > 0.7 { score.to_string().green() }
+                else if *score < 0.4 { score.to_string().red() }
+                else { score.to_string().yellow() };
+            print!("{}={} (×{:.0}%)  ", name, color, weight * 100.0);
+        }
+        println!();
 
         // 2. Confidence gate
         if observation.confidence < confidence_threshold {
@@ -105,8 +127,16 @@ pub async fn run(
             break;
         }
 
-        // 4. Safety check — pre-verify
-        if action.needs_confirm() {
+        // 4. Safety check — pre-verify, modulated by adaptation mode
+        let confirm_needed = if adaptation.confirm_all() {
+            true // Safe mode: confirm everything
+        } else if adaptation.skip_confirm_for_safe() {
+            action.needs_confirm() // Aggressive: only confirm truly dangerous
+        } else {
+            action.needs_confirm() // Nominal/Conservative: standard check
+        };
+
+        if confirm_needed {
             print!("  执行 [{}]? [Y/n]: ", action.kind);
             use std::io::Write;
             std::io::stdout().flush().ok();
